@@ -101,16 +101,30 @@ tar -czf archive.tar.gz directory/
 
 ### Advanced Usage
 
-Use a different model:
+Use a different model for a single query:
 ```bash
 how --model "anthropic/claude-3-haiku" list running docker containers
 ```
+
+Persist a default model to use for all queries (can be overridden by --model):
+```bash
+how set-model "anthropic/claude-3-haiku"
+```
+
+Model selection precedence:
+- --model flag
+- saved default from config (set via how set-model)
+- built-in default: mistralai/mistral-7b-instruct:free
 
 ## Configuration
 
 The configuration file is stored at:
 - **Linux/macOS**: `~/.config/how/config.yaml`
 - **Windows**: `%APPDATA%/how/config.yaml`
+
+Keys used:
+- api_key: your OpenRouter API key
+- model: your saved default model (optional)
 
 ## Development
 

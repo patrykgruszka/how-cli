@@ -47,10 +47,37 @@ var (
 	rootCmd = &cobra.Command{
 		Use:   "how [query...]",
 		Short: "A simple AI assistant for your CLI",
-		Long:  "Ask 'how' to do something and get the shell command you need.\n\nSpecial commands:\n  how setup - Configure your OpenRouter API key",
+		Long:  "Ask 'how' to do something and get the shell command you need.\n\nSpecial commands:\n  how setup - Configure your OpenRouter API key\n  how set-model <model> - Set and persist the default model",
 		Run:   runQuery,
 		// Allow any arguments without treating them as subcommands
 		Args: cobra.ArbitraryArgs,
+	}
+	setModelCmd = &cobra.Command{
+		Use:   "set-model <model>",
+		Short: "Set and persist the default OpenRouter model",
+		Args:  cobra.ExactArgs(1),
+		Run: func(cmd *cobra.Command, args []string) {
+			m := strings.TrimSpace(args[0])
+			if m == "" {
+				fmt.Fprintf(os.Stderr, "Model cannot be empty.\n")
+				os.Exit(1)
+			}
+			viper.Set("model", m)
+			if err := viper.WriteConfig(); err != nil {
+				if _, ok := err.(viper.ConfigFileNotFoundError); ok {
+					configDir, _ := os.UserConfigDir()
+					configPath := filepath.Join(configDir, "how", "config.yaml")
+					if err := viper.WriteConfigAs(configPath); err != nil {
+						fmt.Fprintf(os.Stderr, "Error saving config: %v\n", err)
+						os.Exit(1)
+					}
+				} else {
+					fmt.Fprintf(os.Stderr, "Error saving config: %v\n", err)
+					os.Exit(1)
+				}
+			}
+			fmt.Println("✅ Default model saved successfully!")
+		},
 	}
 )
 
@@ -59,7 +86,10 @@ func init() {
 	initConfig()
 
 	// Add flags
-	rootCmd.PersistentFlags().StringVar(&model, "model", defaultModel, "Specify an OpenRouter model to use")
+	rootCmd.PersistentFlags().StringVar(&model, "model", defaultModel, "Specify an OpenRouter model to use (overrides saved default)")
+
+	// Add subcommands
+	rootCmd.AddCommand(setModelCmd)
 }
 
 func initConfig() {
@@ -147,8 +177,16 @@ func runQuery(cmd *cobra.Command, args []string) {
 	// Join query arguments
 	query := strings.Join(args, " ")
 
+	// Resolve model: flag > config > default
+	effectiveModel := model
+	if !cmd.Flags().Changed("model") {
+		if m := viper.GetString("model"); strings.TrimSpace(m) != "" {
+			effectiveModel = m
+		}
+	}
+
 	// Query OpenRouter API
-	command, err := queryOpenRouter(apiKey, query, model)
+	command, err := queryOpenRouter(apiKey, query, effectiveModel)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
