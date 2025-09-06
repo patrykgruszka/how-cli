@@ -44,6 +44,7 @@ type Choice struct {
 
 var (
 	model   string
+	debug   bool
 	rootCmd = &cobra.Command{
 		Use:   "how [query...]",
 		Short: "A simple AI assistant for your CLI",
@@ -87,6 +88,7 @@ func init() {
 
 	// Add flags
 	rootCmd.PersistentFlags().StringVar(&model, "model", defaultModel, "Specify an OpenRouter model to use (overrides saved default)")
+	rootCmd.PersistentFlags().BoolVar(&debug, "debug", false, "Print debug information (system prompt, user prompt, model)")
 
 	// Add subcommands
 	rootCmd.AddCommand(setModelCmd)
@@ -183,6 +185,18 @@ func runQuery(cmd *cobra.Command, args []string) {
 		if m := viper.GetString("model"); strings.TrimSpace(m) != "" {
 			effectiveModel = m
 		}
+	}
+
+	// Optional debug info
+	systemPrompt := buildSystemPrompt()
+	if debug {
+		fmt.Fprintln(os.Stderr, "=== DEBUG INFO ===")
+		fmt.Fprintf(os.Stderr, "Model: %s\n", effectiveModel)
+		fmt.Fprintln(os.Stderr, "User Prompt:")
+		fmt.Fprintln(os.Stderr, query)
+		fmt.Fprintln(os.Stderr, "System Prompt:")
+		fmt.Fprintln(os.Stderr, systemPrompt)
+		fmt.Fprintln(os.Stderr, "=== END DEBUG INFO ===")
 	}
 
 	// Query OpenRouter API
