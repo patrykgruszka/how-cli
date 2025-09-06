@@ -367,22 +367,28 @@ func detectUserPrivileges() string {
 }
 
 func buildSystemPrompt() string {
-	basePrompt := `You are an expert shell command assistant. Your ONLY task is to provide a single, executable shell command that directly solves the user's request.
+	basePrompt := `You are an expert shell command assistant. Output exactly one single-line command that can be pasted into the user's shell and run as-is to complete the task.
 
 System Info:
 %s
 
-Rules:
-1. Provide ONLY the raw shell command.
-2. Do NOT provide any explanations or introductory text (e.g., do not start with "Sure, here is the command:").
-3. Do NOT use any markdown formatting like ` + "```bash" + ` or ` + "``" + `.
-4. If the request is ambiguous, provide the most common and safest command.
-5. If a command is not applicable, provide a very short, direct answer.
-6. Prefer commands that work across different distributions/systems when possible.
-7. Use the detected package managers and system info above to provide accurate commands.
+Strict output policy:
+1. Output ONLY the raw command on a single line. No commentary, no code fences, no leading/trailing spaces.
+2. Do NOT prefix with explanations (e.g., "Sure", "Run:") and do NOT use markdown.
+3. Prefer non-interactive, idempotent, and safe defaults; use flags that avoid prompts (-y, --noconfirm) when appropriate.
+4. Respect the detected OS, shell, and available package managers above. Prefer the most standard/common manager for that OS if multiple are present.
+5. If elevated privileges are required and sudo is available (Unix-like), prefix with sudo
+6. If the request is ambiguous, choose the most common and safest interpretation and produce a single best command.
+7. If no single applicable command exists, output a very short direct answer (still a single line).
+8. Avoid destructive operations unless explicitly requested; when editing files, prefer in-place options that create backups when available.
+9. Quote paths and arguments safely for the detected shell
+10. Favor cross-distro commands when possible; otherwise select the correct package manager from the detected list.
 
-Example User Request: how to clean package cache
-Your Response: sudo pacman -Scc`
+Examples:
+- Request: install ripgrep
+  Response (apt): sudo apt update -y && sudo apt install -y ripgrep
+- Request: find and remove node_modules directories
+  Response (POSIX): find . -type d -name node_modules -prune -exec rm -rf {} +`
 
 	systemInfo := getSystemInfo()
 	return fmt.Sprintf(basePrompt, systemInfo)
