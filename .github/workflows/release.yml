@@ -1,0 +1,45 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25.x"
+          cache: true
+      
+      - name: Build cross-platform binaries
+        run: make cross VERSION=${{ github.ref_name }}
+      
+      - name: Create release archives
+        run: |
+          cd dist
+          for dir in */; do
+            platform=$(basename "$dir")
+            if [[ "$platform" == windows_* ]]; then
+              zip -r "../how-${{ github.ref_name }}-${platform}.zip" "$dir"
+            else
+              tar -czf "../how-${{ github.ref_name }}-${platform}.tar.gz" "$dir"
+            fi
+          done
+          cd ..
+      
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            how-${{ github.ref_name }}-*.zip
+            how-${{ github.ref_name }}-*.tar.gz
+          generate_release_notes: true
+          draft: false
+          prerelease: false
