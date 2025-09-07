@@ -7,7 +7,7 @@ Enter **`how`** – the slick, AI-powered sidekick that turns your "WTF do I typ
 - 🌐 Runs on Linux, macOS, Windows.
 - 💸 Free models by default—no cost to start.
 
-## 🎯 Usage
+## Usage
 Ask away:
 ```bash
 $ how find all files named docker-compose.yml
@@ -22,10 +22,10 @@ lsof -ti:8080 | xargs kill -9
 
 **Pro Tip**: Override the model with `--model "anthropic/claude-3-haiku"` or set a default via `how set-model`. Defaults to `mistralai/mistral-7b-instruct:free`.
 
-## 🛠️ Install
+## Install
 
 ### Download Pre-built Binary (Recommended)
-Download the latest release for your platform from [GitHub Releases](https://github.com/sst/how-cli/releases):
+Download the latest release for your platform from [GitHub Releases](https://github.com/patrykgruszka/how-cli/releases):
 
 1. Download the archive for your OS/architecture
 2. Extract the binary:
@@ -59,13 +59,13 @@ Download the latest release for your platform from [GitHub Releases](https://git
 
 **Alternatives**: Build manually with `go build` or use `make install`. For cross-platform binaries, run `make cross` (outputs to `dist/`).
 
-## 🔑 Setup
+## Setup
 Grab a free API key from [openrouter.ai/keys](https://openrouter.ai/keys), then:
 ```bash
 how setup
 ```
 Paste your key—it's stored securely in `~/.config/how/config.yaml` (or equivalent on Windows).
 
-## ⚙️ Config & More
+## Config & More
 Tweak your config file if needed (e.g., for a custom default model). For dev builds or contributions:
 - `make build` for local.
