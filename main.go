@@ -19,7 +19,7 @@ import (
 	"github.com/spf13/viper"
 )
 
-const (
+var (
 	apiURL       = "https://openrouter.ai/api/v1/chat/completions"
 	defaultModel = "mistralai/mistral-7b-instruct:free"
 )
@@ -42,14 +42,35 @@ type Choice struct {
 	Message Message `json:"message"`
 }
 
+// Sys abstracts system/environment queries for testability.
+type Sys interface {
+	Env(key string) string
+	LookPath(cmd string) (string, error)
+	CurrentUser() (*user.User, error)
+	GOOS() string
+	GOARCH() string
+	Stat(name string) (os.FileInfo, error)
+}
+
+type realSys struct{}
+
+func (realSys) Env(key string) string                 { return os.Getenv(key) }
+func (realSys) LookPath(cmd string) (string, error)    { return exec.LookPath(cmd) }
+func (realSys) CurrentUser() (*user.User, error)       { return user.Current() }
+func (realSys) GOOS() string                           { return runtime.GOOS }
+func (realSys) GOARCH() string                         { return runtime.GOARCH }
+func (realSys) Stat(name string) (os.FileInfo, error)  { return os.Stat(name) }
+
+var defaultSys Sys = realSys{}
+
 var (
 	model   string
 	debug   bool
-	rootCmd = &cobra.Command{
+ rootCmd = &cobra.Command{
 		Use:   "how [query...]",
 		Short: "A simple AI assistant for your CLI",
 		Long:  "Ask 'how' to do something and get the shell command you need.\n\nSpecial commands:\n  how setup - Configure your OpenRouter API key\n  how set-model <model> - Set and persist the default model",
-		Run:   runQuery,
+		RunE:  runQuery,
 		// Allow any arguments without treating them as subcommands
 		Args: cobra.ArbitraryArgs,
 	}
@@ -116,7 +137,12 @@ func initConfig() {
 	}
 
 	// Read config
-	viper.ReadInConfig()
+	if err := viper.ReadInConfig(); err != nil {
+		// It's okay if the config file is missing; ignore not found, report others
+		if _, ok := err.(viper.ConfigFileNotFoundError); !ok {
+			fmt.Fprintf(os.Stderr, "Error reading config: %v\n", err)
+		}
+	}
 }
 
 func runSetup(cmd *cobra.Command, args []string) {
@@ -157,23 +183,24 @@ func runSetup(cmd *cobra.Command, args []string) {
 	fmt.Println("✅ API key saved successfully!")
 }
 
-func runQuery(cmd *cobra.Command, args []string) {
+func runQuery(cmd *cobra.Command, args []string) error {
 	// Check if first argument is "setup" - handle it specially
 	if len(args) > 0 && args[0] == "setup" {
 		runSetup(cmd, args[1:])
-		return
+		return nil
 	}
 
 	if len(args) == 0 {
-		cmd.Help()
-		return
+		if err := cmd.Help(); err != nil {
+			return err
+		}
+		return nil
 	}
 
 	// Get API key from config
 	apiKey := viper.GetString("api_key")
 	if apiKey == "" {
-		fmt.Fprintf(os.Stderr, "Error: API key not found. Please run 'how setup' first.\n")
-		os.Exit(1)
+		return fmt.Errorf("API key not found. Please run 'how setup' first")
 	}
 
 	// Join query arguments
@@ -200,16 +227,20 @@ func runQuery(cmd *cobra.Command, args []string) {
 	}
 
 	// Query OpenRouter API
-	command, err := queryOpenRouter(apiKey, query, effectiveModel)
+	client := &http.Client{Timeout: 20 * time.Second}
+	endpoint := apiURL
+	command, err := queryOpenRouter(client, endpoint, apiKey, query, effectiveModel)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
+		return err
 	}
 
-	fmt.Println(command)
+	if _, err := fmt.Fprintln(cmd.OutOrStdout(), command); err != nil {
+		return err
+	}
+	return nil
 }
 
-func queryOpenRouter(apiKey, query, model string) (string, error) {
+func queryOpenRouter(client *http.Client, endpoint, apiKey, query, model string) (string, error) {
 	// Prepare request with dynamic system prompt
 	systemPrompt := buildSystemPrompt()
 	reqBody := OpenRouterRequest{
@@ -226,7 +257,10 @@ func queryOpenRouter(apiKey, query, model string) (string, error) {
 	}
 
 	// Create HTTP request
-	req, err := http.NewRequest("POST", apiURL, bytes.NewBuffer(jsonData))
+	if endpoint == "" {
+		endpoint = apiURL
+	}
+	req, err := http.NewRequest("POST", endpoint, bytes.NewBuffer(jsonData))
 	if err != nil {
 		return "", fmt.Errorf("failed to create request: %v", err)
 	}
@@ -238,12 +272,16 @@ func queryOpenRouter(apiKey, query, model string) (string, error) {
 	req.Header.Set("X-Title", "how-cli")
 
 	// Make request
-	client := &http.Client{Timeout: 20 * time.Second}
+	if client == nil {
+		client = &http.Client{Timeout: 20 * time.Second}
+	}
 	resp, err := client.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("network request failed: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 
 	// Read response
 	body, err := io.ReadAll(resp.Body)
@@ -269,11 +307,13 @@ func queryOpenRouter(apiKey, query, model string) (string, error) {
 	return strings.TrimSpace(apiResp.Choices[0].Message.Content), nil
 }
 
-func getSystemInfo() string {
+func getSystemInfo() string { return getSystemInfoWith(defaultSys) }
+
+func getSystemInfoWith(sys Sys) string {
 	var info []string
 
 	// OS detection
-	osName := runtime.GOOS
+	osName := sys.GOOS()
 	switch osName {
 	case "linux":
 		osName = "Linux"
@@ -285,17 +325,17 @@ func getSystemInfo() string {
 	info = append(info, fmt.Sprintf("- OS: %s", osName))
 
 	// Architecture
-	info = append(info, fmt.Sprintf("- Architecture: %s", runtime.GOARCH))
+	info = append(info, fmt.Sprintf("- Architecture: %s", sys.GOARCH()))
 
 	// Shell detection
-	if shell := os.Getenv("SHELL"); shell != "" {
+	if shell := sys.Env("SHELL"); shell != "" {
 		shellName := filepath.Base(shell)
 		info = append(info, fmt.Sprintf("- Shell: %s", shellName))
-	} else if runtime.GOOS == "windows" {
+	} else if sys.GOOS() == "windows" {
 		// Check for PowerShell on Windows
-		if _, err := exec.LookPath("pwsh"); err == nil {
+		if _, err := sys.LookPath("pwsh"); err == nil {
 			info = append(info, "- Shell: PowerShell Core")
-		} else if _, err := exec.LookPath("powershell"); err == nil {
+		} else if _, err := sys.LookPath("powershell"); err == nil {
 			info = append(info, "- Shell: Windows PowerShell")
 		} else {
 			info = append(info, "- Shell: Command Prompt")
@@ -303,13 +343,13 @@ func getSystemInfo() string {
 	}
 
 	// Package manager detection
-	packageManagers := detectPackageManagers()
+	packageManagers := detectPackageManagersWith(sys)
 	if len(packageManagers) > 0 {
 		info = append(info, fmt.Sprintf("- Package Managers: %s", strings.Join(packageManagers, ", ")))
 	}
 
 	// User privilege detection
-	privInfo := detectUserPrivileges()
+	privInfo := detectUserPrivilegesWith(sys)
 	if privInfo != "" {
 		info = append(info, fmt.Sprintf("- User Privileges: %s", privInfo))
 	}
@@ -317,7 +357,8 @@ func getSystemInfo() string {
 	return strings.Join(info, "\n")
 }
 
-func detectPackageManagers() []string {
+
+func detectPackageManagersWith(sys Sys) []string {
 	var managers []string
 
 	packageManagerMap := map[string]string{
@@ -337,7 +378,7 @@ func detectPackageManagers() []string {
 	}
 
 	for cmd, name := range packageManagerMap {
-		if _, err := exec.LookPath(cmd); err == nil {
+		if _, err := sys.LookPath(cmd); err == nil {
 			managers = append(managers, name)
 		}
 	}
@@ -345,11 +386,12 @@ func detectPackageManagers() []string {
 	return managers
 }
 
-func detectUserPrivileges() string {
+
+func detectUserPrivilegesWith(sys Sys) string {
 	var privileges []string
 
 	// Check if running as root/admin
-	currentUser, err := user.Current()
+	currentUser, err := sys.CurrentUser()
 	if err == nil {
 		if currentUser.Uid == "0" || currentUser.Username == "root" {
 			privileges = append(privileges, "root")
@@ -357,16 +399,16 @@ func detectUserPrivileges() string {
 	}
 
 	// Check sudo availability (Unix-like systems)
-	if runtime.GOOS != "windows" {
-		if _, err := exec.LookPath("sudo"); err == nil {
+	if sys.GOOS() != "windows" {
+		if _, err := sys.LookPath("sudo"); err == nil {
 			privileges = append(privileges, "sudo available")
 		}
 	}
 
 	// Check admin privileges on Windows
-	if runtime.GOOS == "windows" {
+	if sys.GOOS() == "windows" {
 		// Simple check - try to access a system directory
-		if _, err := os.Stat("C:\\Windows\\System32\\config\\SAM"); err == nil {
+		if _, err := sys.Stat("C:\\Windows\\System32\\config\\SAM"); err == nil {
 			privileges = append(privileges, "administrator")
 		} else {
 			privileges = append(privileges, "standard user")
@@ -381,6 +423,11 @@ func detectUserPrivileges() string {
 }
 
 func buildSystemPrompt() string {
+	systemInfo := getSystemInfo()
+	return buildSystemPromptFrom(systemInfo)
+}
+
+func buildSystemPromptFrom(systemInfo string) string {
 	basePrompt := `You are an expert shell command assistant. Output exactly one single-line command that can be pasted into the user's shell and run as-is to complete the task.
 
 System Info:
@@ -404,8 +451,8 @@ Examples:
 - Request: find and remove node_modules directories
   Response (POSIX): find . -type d -name node_modules -prune -exec rm -rf {} +`
 
-	systemInfo := getSystemInfo()
-	return fmt.Sprintf(basePrompt, systemInfo)
+	// Ensure trailing newline to match golden file and avoid platform EOL issues
+	return fmt.Sprintf(basePrompt+"\n", systemInfo)
 }
 
 func main() {
