@@ -45,6 +45,12 @@ Download the latest release for your platform from [GitHub Releases](https://git
    # Move how.exe to a directory in your PATH
    ```
 
+### Arch Linux (AUR)
+For Arch Linux users, install via AUR:
+```bash
+yay -S how-cli
+```
+
 ### Build from Source
 1. Clone the repo:
    ```bash
