@@ -24,7 +24,7 @@ const (
 	providerOpenAI     = "openai"
 
 	openRouterURL          = "https://openrouter.ai/api/v1/chat/completions"
-	openRouterDefaultModel = "mistralai/mistral-7b-instruct:free"
+	openRouterDefaultModel = "anthropic/claude-haiku-4.5"
 
 	openAiURL          = "https://api.openai.com/v1/chat/completions"
 	openAiDefaultModel = "gpt-4o"

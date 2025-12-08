@@ -1,11 +1,12 @@
 # `how` - Lightweight AI assistant for your CLI
 
-Enter **`how`** – the slick, AI-powered sidekick that turns your "WTF do I type?" moments into commands. Built in Go for speed, this cross-platform tool taps OpenRouter.ai's API to generate commands via top LLMs (even free ones!).
+Enter **`how`** – the slick, AI-powered sidekick that turns your "WTF do I type?" moments into commands. Built in Go for speed, this cross-platform tool taps into AI to generate commands via top LLMs.
 
 ## Features
-- ⚡ Blazing fast and dependency-free.
-- 🌐 Runs on Linux, macOS, Windows.
-- 💸 Free models by default—no cost to start.
+- Fast and dependency-free.
+- Runs on Linux, macOS, Windows.
+- Support for **OpenRouter** (default) and **OpenAI**.
+- Configurable models and providers.
 
 ## Usage
 Ask away:
@@ -20,7 +21,7 @@ $ how kill process on port 8080
 lsof -ti:8080 | xargs kill -9
 ```
 
-**Pro Tip**: Override the model with `--model "anthropic/claude-3-haiku"` or set a default via `how set-model`. Defaults to `mistralai/mistral-7b-instruct:free`.
+**Pro Tip**: Override the model with `--model "google/gemini-2.5-flash"` or set a default via `how set-model`. Defaults to `anthropic/claude-haiku-4.5`.
 
 ## Install
 
@@ -60,12 +61,18 @@ Download the latest release for your platform from [GitHub Releases](https://git
 **Alternatives**: Build manually with `go build` or use `make install`. For cross-platform binaries, run `make cross` (outputs to `dist/`).
 
 ## Setup
-Grab a free API key from [openrouter.ai/keys](https://openrouter.ai/keys), then:
+You need an API key.
+1. OpenRouter (Default): Get a key from [openrouter.ai/keys](https://openrouter.ai/keys).
+2. OpenAI: Get a key from [platform.openai.com](https://platform.openai.com).
+Run setup to select your provider and save your key:
+
 ```bash
 how setup
 ```
 Paste your key—it's stored securely in `~/.config/how/config.yaml` (or equivalent on Windows).
 
 ## Config & More
-Tweak your config file if needed (e.g., for a custom default model). For dev builds or contributions:
-- `make build` for local.
+Variables are stored in `~/.config/how/config.yaml`.
+- `provider`: `openrouter` (default) or `openai`.
+- `api_key`: Your API key.
+- `model`: Default model ID.
