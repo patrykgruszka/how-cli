@@ -136,10 +136,10 @@ func runSetup(cmd *cobra.Command, args []string) {
 	fmt.Println("1. OpenRouter (default)")
 	fmt.Println("2. OpenAI")
 	fmt.Print("Choice [1]: ")
-	
+
 	choice, _ := reader.ReadString('\n')
 	choice = strings.TrimSpace(choice)
-	
+
 	provider := providerOpenRouter
 	if choice == "2" {
 		provider = providerOpenAI
@@ -156,8 +156,8 @@ func runSetup(cmd *cobra.Command, args []string) {
 
 	viper.Set("provider", provider)
 	viper.Set("api_key", apiKey)
-	
-	// Clear specific model config when switching providers to strictly avoid incompatibility
+
+	// Clear specific model config to avoid using an invalid model ID for the new provider
 	viper.Set("model", "")
 
 	if err := saveConfig(); err != nil {
@@ -195,7 +195,7 @@ func runQuery(cmd *cobra.Command, args []string) error {
 	case providerOpenAI:
 		endpoint = openAiURL
 		defaultModel = openAiDefaultModel
-	default: 
+	default:
 		endpoint = openRouterURL
 		defaultModel = openRouterDefaultModel
 		isRefererNeeded = true
@@ -383,7 +383,13 @@ Strict output policy:
 8. Avoid destructive operations unless explicitly requested; when editing files, prefer in-place options that create backups when available.
 9. Quote paths and arguments safely for the detected shell
 10. Favor cross-distro commands when possible; otherwise select the correct package manager from the detected list.
-`
+
+Examples:
+- Request: install ripgrep
+  Response (apt): sudo apt update -y && sudo apt install -y ripgrep
+- Request: find and remove node_modules directories
+  Response (POSIX): find . -type d -name node_modules -prune -exec rm -rf {} +`
+
 	return fmt.Sprintf(basePrompt+"\n", systemInfo)
 }
 
