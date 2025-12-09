@@ -6,10 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
-	"time"
 )
 
-func TestQueryOpenRouter_OK(t *testing.T) {
+func TestQueryLLM_OK(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			t.Fatalf("expected POST got %s", r.Method)
@@ -20,11 +19,11 @@ func TestQueryOpenRouter_OK(t *testing.T) {
 		if ct := r.Header.Get("Content-Type"); ct != "application/json" {
 			t.Fatalf("unexpected content-type: %s", ct)
 		}
- 	b, _ := io.ReadAll(r.Body)
- 	if err := r.Body.Close(); err != nil {
- 		t.Fatalf("close body: %v", err)
- 	}
-		var body OpenRouterRequest
+		b, _ := io.ReadAll(r.Body)
+		if err := r.Body.Close(); err != nil {
+			t.Fatalf("close body: %v", err)
+		}
+		var body ChatRequest
 		if err := json.Unmarshal(b, &body); err != nil {
 			t.Fatalf("invalid json: %v", err)
 		}
@@ -38,8 +37,7 @@ func TestQueryOpenRouter_OK(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	client := &http.Client{Timeout: time.Second}
-	cmd, err := queryOpenRouter(client, srv.URL, "test", "say hi", "mistral")
+	cmd, err := queryLLM(srv.URL, "test", "say hi", "mistral", true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,17 +46,16 @@ func TestQueryOpenRouter_OK(t *testing.T) {
 	}
 }
 
-func TestQueryOpenRouter_ErrorStatus(t *testing.T) {
+func TestQueryLLM_ErrorStatus(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
- 	w.WriteHeader(http.StatusBadRequest)
+		w.WriteHeader(http.StatusBadRequest)
 		if _, err := w.Write([]byte("bad")); err != nil {
 			t.Fatalf("write error body: %v", err)
 		}
 	}))
 	defer srv.Close()
 
-	client := &http.Client{Timeout: time.Second}
-	_, err := queryOpenRouter(client, srv.URL, "k", "q", "m")
+	_, err := queryLLM(srv.URL, "k", "q", "m", false)
 	if err == nil {
 		t.Fatal("expected error")
 	}
