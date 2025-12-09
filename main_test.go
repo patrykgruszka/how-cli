@@ -2,10 +2,10 @@ package main
 
 import (
 	"bytes"
-	"strings"
-	"testing"
 	"github.com/spf13/viper"
 	"os"
+	"strings"
+	"testing"
 )
 
 func TestMain(m *testing.M) {
@@ -34,7 +34,7 @@ func TestRoot_MissingAPIKey_Errors(t *testing.T) {
 	rootCmd.SetArgs([]string{"echo", "hi"})
 	viper.Set("api_key", "")
 	defer viper.Set("api_key", "")
-	
+
 	err := runQuery(rootCmd, []string{"echo", "hi"})
 	if err == nil || !strings.Contains(err.Error(), "API key not found") {
 		t.Fatalf("expected missing key error, got: %v", err)
@@ -47,18 +47,20 @@ func TestRoot_SetModel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() {
+		_ = os.RemoveAll(tmpDir)
+	}()
 
 	// Since saveConfig uses UserConfigDir, we can't easily mock the path without refactoring saveConfig.
 	// Logic check instead: verify viper gets set.
 	bOut := &bytes.Buffer{}
 	setModelCmd.SetOut(bOut)
 	setModelCmd.SetArgs([]string{"new-model"})
-	
+
 	// mock file output failure but verify memory state
 	viper.Set("model", "old")
-	
-	// We can't execute the command fully because it tries to write to disk. 
+
+	// We can't execute the command fully because it tries to write to disk.
 	// We will just verify viper behavior conceptually or skip the persistent part in this unit test
 	// and trust integration.
 	// Just test viper logic directly:
