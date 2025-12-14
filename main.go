@@ -68,16 +68,37 @@ func (realSys) Stat(name string) (os.FileInfo, error) { return os.Stat(name) }
 
 var defaultSys Sys = realSys{}
 
+type HistoryEntry struct {
+	Timestamp time.Time `json:"timestamp"`
+	Query     string    `json:"query"`
+	Command   string    `json:"command"`
+	Provider  string    `json:"provider"`
+	Model     string    `json:"model"`
+	OS        string    `json:"os"`
+	Arch      string    `json:"arch"`
+	Shell     string    `json:"shell"`
+}
+
 var (
 	modelFlag string
 	debug     bool
-	rootCmd   = &cobra.Command{
+	runFlag   bool
+	yesFlag   bool
+
+	rootCmd = &cobra.Command{
 		Use:   "how [query...]",
 		Short: "A simple AI assistant for your CLI",
-		Long:  "Ask 'how' to do something and get the shell command you need.\n\nCommands:\n  how setup - Configure provider and API key\n  how set-model <model> - Set default model",
+		Long:  "Ask 'how' to do something and get the shell command you need.",
 		RunE:  runQuery,
 		Args:  cobra.ArbitraryArgs,
 	}
+
+	setupCmd = &cobra.Command{
+		Use:   "setup",
+		Short: "Configure provider and API key",
+		Run:   runSetup,
+	}
+
 	setModelCmd = &cobra.Command{
 		Use:   "set-model <model>",
 		Short: "Set and persist the default model",
@@ -96,13 +117,41 @@ var (
 			fmt.Println("✅ Default model saved successfully!")
 		},
 	}
+
+	lastCmd = &cobra.Command{
+		Use:   "last",
+		Short: "Print (or run) the last generated command",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			entry, err := readLastHistory()
+			if err != nil {
+				return err
+			}
+
+			// Keep stdout clean: print the raw command to stdout
+			_, _ = fmt.Fprintln(cmd.OutOrStdout(), entry.Command)
+
+			if runFlag {
+				if err := confirmOrFail(entry.Command); err != nil {
+					return err
+				}
+				return executeShellCommand(entry.Command)
+			}
+			return nil
+		},
+	}
 )
 
 func init() {
 	initConfig()
+
 	rootCmd.PersistentFlags().StringVar(&modelFlag, "model", "", "Override configured model")
 	rootCmd.PersistentFlags().BoolVar(&debug, "debug", false, "Print debug information")
+	rootCmd.PersistentFlags().BoolVar(&runFlag, "run", false, "Execute the generated command (asks for confirmation unless --yes)")
+	rootCmd.PersistentFlags().BoolVar(&yesFlag, "yes", false, "Skip confirmation prompt when using --run")
+
+	rootCmd.AddCommand(setupCmd)
 	rootCmd.AddCommand(setModelCmd)
+	rootCmd.AddCommand(lastCmd)
 }
 
 func initConfig() {
@@ -127,6 +176,75 @@ func saveConfig() error {
 	}
 	configPath := filepath.Join(configDir, "how", "config.yaml")
 	return viper.WriteConfigAs(configPath)
+}
+
+func historyFilePath() (string, error) {
+	configDir, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	howConfigDir := filepath.Join(configDir, "how")
+	if err := os.MkdirAll(howConfigDir, 0755); err != nil {
+		return "", err
+	}
+	return filepath.Join(howConfigDir, "history.jsonl"), nil
+}
+
+func appendHistory(e HistoryEntry) {
+	p, err := historyFilePath()
+	if err != nil {
+		return
+	}
+	f, err := os.OpenFile(p, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return
+	}
+	defer func() { _ = f.Close() }()
+
+	b, err := json.Marshal(e)
+	if err != nil {
+		return
+	}
+	_, _ = f.Write(append(b, '\n'))
+}
+
+func readLastHistory() (*HistoryEntry, error) {
+	p, err := historyFilePath()
+	if err != nil {
+		return nil, err
+	}
+	f, err := os.Open(p)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, fmt.Errorf("no history yet")
+		}
+		return nil, err
+	}
+	defer func() { _ = f.Close() }()
+
+	sc := bufio.NewScanner(f)
+	var lastLine string
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
+		if line != "" {
+			lastLine = line
+		}
+	}
+	if err := sc.Err(); err != nil {
+		return nil, err
+	}
+	if lastLine == "" {
+		return nil, fmt.Errorf("no history yet")
+	}
+
+	var e HistoryEntry
+	if err := json.Unmarshal([]byte(lastLine), &e); err != nil {
+		return nil, fmt.Errorf("failed to parse history: %w", err)
+	}
+	if strings.TrimSpace(e.Command) == "" {
+		return nil, fmt.Errorf("last history entry has empty command")
+	}
+	return &e, nil
 }
 
 func runSetup(cmd *cobra.Command, args []string) {
@@ -157,7 +275,7 @@ func runSetup(cmd *cobra.Command, args []string) {
 	viper.Set("provider", provider)
 	viper.Set("api_key", apiKey)
 
-	// Clear specific model config to avoid using an invalid model ID for the new provider
+	// Clear model on provider switch to avoid invalid model IDs for the new provider
 	viper.Set("model", "")
 
 	if err := saveConfig(); err != nil {
@@ -169,11 +287,6 @@ func runSetup(cmd *cobra.Command, args []string) {
 }
 
 func runQuery(cmd *cobra.Command, args []string) error {
-	if len(args) > 0 && args[0] == "setup" {
-		runSetup(cmd, args[1:])
-		return nil
-	}
-
 	if len(args) == 0 {
 		return cmd.Help()
 	}
@@ -224,9 +337,41 @@ func runQuery(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return fmt.Errorf("model returned an empty command")
+	}
+	// Guardrail: you requested single-line; refuse multi-line before execution.
+	if strings.Contains(command, "\n") || strings.Contains(command, "\r") {
+		return fmt.Errorf("model returned a multi-line response; refusing")
+	}
 
+	// Save history (best-effort)
+	appendHistory(HistoryEntry{
+		Timestamp: time.Now(),
+		Query:     query,
+		Command:   command,
+		Provider:  provider,
+		Model:     effectiveModel,
+		OS:        runtime.GOOS,
+		Arch:      runtime.GOARCH,
+		Shell:     detectShellName(defaultSys),
+	})
+
+	// Always print the raw command to stdout (preserves existing behavior)
 	_, err = fmt.Fprintln(cmd.OutOrStdout(), command)
-	return err
+	if err != nil {
+		return err
+	}
+
+	if runFlag {
+		if err := confirmOrFail(command); err != nil {
+			return err
+		}
+		return executeShellCommand(command)
+	}
+
+	return nil
 }
 
 func queryLLM(endpoint, apiKey, query, model string, refererNeeded bool) (string, error) {
@@ -260,9 +405,7 @@ func queryLLM(endpoint, apiKey, query, model string, refererNeeded bool) (string
 	if err != nil {
 		return "", err
 	}
-	defer func() {
-		_ = resp.Body.Close()
-	}()
+	defer func() { _ = resp.Body.Close() }()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -283,6 +426,78 @@ func queryLLM(endpoint, apiKey, query, model string, refererNeeded bool) (string
 	}
 
 	return strings.TrimSpace(apiResp.Choices[0].Message.Content), nil
+}
+
+func isTTY(f *os.File) bool {
+	fi, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	return (fi.Mode() & os.ModeCharDevice) != 0
+}
+
+func confirmOrFail(command string) error {
+	if yesFlag {
+		return nil
+	}
+	// If we cannot prompt, fail safe.
+	if !isTTY(os.Stdin) || !isTTY(os.Stderr) {
+		return fmt.Errorf("refusing to run without confirmation (no TTY). Re-run with --yes if you really want to")
+	}
+
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Fprintln(os.Stderr, "Run this command? [y/N]")
+	fmt.Fprintln(os.Stderr, command)
+	fmt.Fprint(os.Stderr, "> ")
+
+	in, _ := reader.ReadString('\n')
+	in = strings.TrimSpace(strings.ToLower(in))
+	if in == "y" || in == "yes" {
+		return nil
+	}
+	return fmt.Errorf("aborted")
+}
+
+func detectShellName(sys Sys) string {
+	if sys.GOOS() == "windows" {
+		if _, err := sys.LookPath("pwsh"); err == nil {
+			return "pwsh"
+		}
+		if _, err := sys.LookPath("powershell"); err == nil {
+			return "powershell"
+		}
+		return "cmd"
+	}
+	if shell := sys.Env("SHELL"); shell != "" {
+		return filepath.Base(shell)
+	}
+	return "sh"
+}
+
+func executeShellCommand(command string) error {
+	if runtime.GOOS == "windows" {
+		if _, err := exec.LookPath("pwsh"); err == nil {
+			c := exec.Command("pwsh", "-NoProfile", "-Command", command)
+			c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
+			return c.Run()
+		}
+		if _, err := exec.LookPath("powershell"); err == nil {
+			c := exec.Command("powershell", "-NoProfile", "-Command", command)
+			c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
+			return c.Run()
+		}
+		c := exec.Command("cmd", "/C", command)
+		c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
+		return c.Run()
+	}
+
+	shell := os.Getenv("SHELL")
+	if shell == "" {
+		shell = "sh"
+	}
+	c := exec.Command(shell, "-c", command)
+	c.Stdin, c.Stdout, c.Stderr = os.Stdin, os.Stdout, os.Stderr
+	return c.Run()
 }
 
 func getSystemInfo() string { return getSystemInfoWith(defaultSys) }
