@@ -7,8 +7,12 @@ Enter **`how`** – the slick, AI-powered sidekick that turns your "WTF do I typ
 - Runs on Linux, macOS, Windows.
 - Support for **OpenRouter** (default) and **OpenAI**.
 - Configurable models and providers.
+- Optional command execution with confirmation.
+- Saves a local history of generated commands.
 
 ## Usage
+
+### Generate a command
 Ask away:
 ```bash
 $ how find all files named docker-compose.yml
@@ -23,6 +27,37 @@ lsof -ti:8080 | xargs kill -9
 
 **Pro Tip**: Override the model with `--model "google/gemini-2.5-flash"` or set a default via `how set-model`. Defaults to `anthropic/claude-haiku-4.5`.
 
+### Run the generated command (optional)
+If you want `how` to execute what it generates:
+
+```bash
+$ how --run find all files named docker-compose.yml
+find . -type f -name "docker-compose.yml"
+# Prompts: Run this command? [y/N]
+```
+
+Skip confirmation (use carefully):
+
+```bash
+$ how --run --yes kill process on port 8080
+lsof -ti:8080 | xargs kill -9
+```
+
+### Reuse the last generated command
+Print the last generated command:
+
+```bash
+$ how last
+echo hi
+```
+
+Run the last generated command (with confirmation unless `--yes`):
+
+```bash
+$ how last --run
+$ how last --run --yes
+```
+
 ## Install
 
 ### Download Pre-built Binary (Recommended)
@@ -33,7 +68,7 @@ Download the latest release for your platform from [GitHub Releases](https://git
    ```bash
    # Linux/macOS
    tar -xzf how-v*.tar.gz
-   
+
    # Windows
    # Extract the .zip file
    ```
@@ -41,7 +76,7 @@ Download the latest release for your platform from [GitHub Releases](https://git
    ```bash
    # Linux/macOS
    sudo mv how /usr/local/bin/
-   
+
    # Windows
    # Move how.exe to a directory in your PATH
    ```
@@ -70,15 +105,31 @@ yay -S how-cli
 You need an API key.
 1. OpenRouter (Default): Get a key from [openrouter.ai/keys](https://openrouter.ai/keys).
 2. OpenAI: Get a key from [platform.openai.com](https://platform.openai.com).
-Run setup to select your provider and save your key:
 
+Run setup to select your provider and save your key:
 ```bash
 how setup
 ```
-Paste your key—it's stored securely in `~/.config/how/config.yaml` (or equivalent on Windows).
 
-## Config & More
+Paste your key—it's stored in `~/.config/how/config.yaml` (or equivalent on Windows).
+
+## Config & History
+
+### Config
 Variables are stored in `~/.config/how/config.yaml`.
-- `provider`: `openrouter` (default) or `openai`.
-- `api_key`: Your API key.
-- `model`: Default model ID.
+- `provider`: `openrouter` (default) or `openai`
+- `api_key`: your API key
+- `model`: default model ID
+
+### History
+Generated commands are saved locally to:
+- `~/.config/how/history.jsonl` (or equivalent on Windows)
+
+This is used by `how last`.
+
+## Flags
+- `--model`: override the configured/default model for a single invocation
+- `--run`: execute the generated command (prompts for confirmation)
+- `--yes`: skip confirmation when used with `--run`
+- `--debug`: print debug information (provider, endpoint, model, prompt)
+

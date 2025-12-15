@@ -68,6 +68,8 @@ func (realSys) Stat(name string) (os.FileInfo, error) { return os.Stat(name) }
 
 var defaultSys Sys = realSys{}
 
+var llmQuery = queryLLM
+
 type HistoryEntry struct {
 	Timestamp time.Time `json:"timestamp"`
 	Query     string    `json:"query"`
@@ -154,40 +156,54 @@ func init() {
 	rootCmd.AddCommand(lastCmd)
 }
 
+func howConfigDir() (string, error) {
+	// Test/CI override (and generally useful for power users)
+	if d := strings.TrimSpace(os.Getenv("HOW_CONFIG_DIR")); d != "" {
+		if err := os.MkdirAll(d, 0755); err != nil {
+			return "", err
+		}
+		return d, nil
+	}
+
+	configDir, err := os.UserConfigDir()
+	if err != nil {
+		return "", err
+	}
+	d := filepath.Join(configDir, "how")
+	if err := os.MkdirAll(d, 0755); err != nil {
+		return "", err
+	}
+	return d, nil
+}
+
 func initConfig() {
 	viper.SetConfigName("config")
 	viper.SetConfigType("yaml")
-	configDir, err := os.UserConfigDir()
+
+	dir, err := howConfigDir()
 	if err != nil {
 		return
 	}
-	howConfigDir := filepath.Join(configDir, "how")
-	viper.AddConfigPath(howConfigDir)
-	if err := os.MkdirAll(howConfigDir, 0755); err != nil {
-		return
-	}
+
+	viper.AddConfigPath(dir)
 	_ = viper.ReadInConfig()
 }
 
 func saveConfig() error {
-	configDir, err := os.UserConfigDir()
+	dir, err := howConfigDir()
 	if err != nil {
 		return err
 	}
-	configPath := filepath.Join(configDir, "how", "config.yaml")
+	configPath := filepath.Join(dir, "config.yaml")
 	return viper.WriteConfigAs(configPath)
 }
 
 func historyFilePath() (string, error) {
-	configDir, err := os.UserConfigDir()
+	dir, err := howConfigDir()
 	if err != nil {
 		return "", err
 	}
-	howConfigDir := filepath.Join(configDir, "how")
-	if err := os.MkdirAll(howConfigDir, 0755); err != nil {
-		return "", err
-	}
-	return filepath.Join(howConfigDir, "history.jsonl"), nil
+	return filepath.Join(dir, "history.jsonl"), nil
 }
 
 func appendHistory(e HistoryEntry) {
@@ -333,7 +349,7 @@ func runQuery(cmd *cobra.Command, args []string) error {
 		fmt.Fprintln(os.Stderr, "=== END DEBUG INFO ===")
 	}
 
-	command, err := queryLLM(endpoint, apiKey, query, effectiveModel, isRefererNeeded)
+	command, err := llmQuery(endpoint, apiKey, query, effectiveModel, isRefererNeeded)
 	if err != nil {
 		return err
 	}
